@@ -87,7 +87,6 @@ public class ServerMain extends JFrame implements ActionListener{
 				//버퍼를 비우기
 				buffw.flush();
 			}
-			
 		} catch (NumberFormatException e) {
 			/*  예외의 종류
 			 1. Checked Exception : 컴파일 타이밍에 잡아내는예외. 예외처리 강요되어 이클립스가 자동으로 try/catch문 생성해줌.

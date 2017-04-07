@@ -1,4 +1,4 @@
-package echo.client;
+package uni.client;
 
 import java.awt.BorderLayout;
 import java.awt.Choice;
@@ -8,11 +8,7 @@ import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.sql.Connection;
@@ -29,6 +25,8 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 
 import db.DBManager;
+import echo.client.Chat;
+import echo.client.ClientThread;
 
 public class ClientMain extends JFrame implements ItemListener, ActionListener{
 	JPanel p_north;
@@ -37,29 +35,27 @@ public class ClientMain extends JFrame implements ItemListener, ActionListener{
 	JButton bt_connect;
 	JTextArea area;
 	JScrollPane scroll;
-	
+	int port=7777;
 	DBManager manager;
 	ArrayList<Chat> list=new ArrayList<Chat>();
-	
-	int port=7777;	
-	Socket socket;//대화용 소켓! 따라서 스트림도 뽑아낼 예정 
 	String ip;
+	Socket socket;
 	ClientThread ct;
 	
 	public ClientMain() {
-		
 		p_north = new JPanel();
 		choice = new Choice();
-		t_port = new JTextField(Integer.toString(port),10);
-		t_input = new JTextField(10);
+		t_port = new JTextField(Integer.toString(port),5);
+		t_input = new JTextField();
 		bt_connect = new JButton("접속");
 		area = new JTextArea();
 		scroll = new JScrollPane(area);
-		manager=DBManager.getInstance(); //싱글톤 기법으로 생성
+		manager = DBManager.getInstance();
 		
 		p_north.add(choice);
 		p_north.add(t_port);
 		p_north.add(bt_connect);
+		
 		add(p_north, BorderLayout.NORTH);
 		add(scroll);
 		add(t_input, BorderLayout.SOUTH);
@@ -70,21 +66,18 @@ public class ClientMain extends JFrame implements ItemListener, ActionListener{
 			choice.add(list.get(i).getName());
 		}
 		
+		//리스너와 연결!!
 		choice.addItemListener(this);
 		bt_connect.addActionListener(this);
-		t_input.addKeyListener(new KeyAdapter() {
-			@Override
+		
+		t_input.addKeyListener(new KeyAdapter(){
 			public void keyReleased(KeyEvent e) {
 				int key=e.getKeyCode();
 				
-				if(key==KeyEvent.VK_ENTER){
+				if(key == KeyEvent.VK_ENTER){
 					String msg=t_input.getText();
-					
-					ct.send(msg);	//서버에 보내고
-					t_input.setText("");//입력한 글씨 지우기
-					
-					
-					//listen(); //서버에서 다시 받기//앞으로 실시간으로 listen하기 때문에 통째로 지워도 됨
+					ct.send(msg);
+					t_input.setText("");
 				}
 			}
 		});
@@ -94,31 +87,29 @@ public class ClientMain extends JFrame implements ItemListener, ActionListener{
 		setDefaultCloseOperation(EXIT_ON_CLOSE);
 	}
 	
-	//데이터베이스 가져오기
+	//데이터베이스 가져오기!!
 	public void loadIP(){
-		Connection con=manager.getConnection();//db연동
+		Connection con=manager.getConnection();
 		PreparedStatement pstmt=null;
 		ResultSet rs=null;
 		
 		String sql="select * from chat order by chat_id asc";
 		try {
-			pstmt=con.prepareStatement(sql); //쿼리문의 종류가 select문이라서 resultset이 반환된다. 
-			rs=pstmt.executeQuery(); //rs는 dto로 옮기꺼라서 스크롤이 있는 커서로 옮길 필요가 없다. 
+			pstmt=con.prepareStatement(sql);
+			rs=pstmt.executeQuery();
 			
-			//rs의 모든 데이터를 dto로 옮기는 과정(맵핑)
+			//rs의 모든 데이터를 dto 로 옮기는 과정..
 			while(rs.next()){
-				Chat dto=new Chat(); //이 chat이 레코드 한건을 받음
+				Chat dto = new Chat();
 				dto.setChat_id(rs.getInt("chat_id"));
 				dto.setName(rs.getString("name"));
 				dto.setIp(rs.getString("ip"));
-				//여기까지가 레코드 한건을 담는과정
-
-				list.add(dto); //이렇게 해서 2차원이 됨, 이제 rs는 필요없으니 죽이자. 
+				
+				list.add(dto);
 			}
-			
 		} catch (SQLException e) {
 			e.printStackTrace();
-		} finally {
+		}finally{
 			if(rs!=null){
 				try {
 					rs.close();
@@ -133,56 +124,44 @@ public class ClientMain extends JFrame implements ItemListener, ActionListener{
 					e.printStackTrace();
 				}
 			}
-			manager.disConnect(con);//con도 반납
+			manager.disConnect(con);
 		}
-		
 	}
 	
-	@Override
 	public void itemStateChanged(ItemEvent e) {
-		Choice ch=(Choice)e.getSource();//선택한 인덱스를 구하려고 초이스로 형변환, 초이스 형에만 셀릭티느 인덱스가 있다. 
-		int index=ch.getSelectedIndex();//내가 선택한 인덱스
+		Choice ch=(Choice)e.getSource();
+		int index=ch.getSelectedIndex();
 		Chat chat=list.get(index);
 		this.setTitle(chat.getIp());
-		ip=chat.getIp();//멤버변수 ip에도 실제ip값을 대입
+		ip=chat.getIp(); //멤버변수에도 대입!!
 	}
-
-	//서버에 접속을 시도하자!!
+	
+	//서버에 접속
 	public void connect(){
-		//소켓생성시 접속이 발생함
+		//접속자는 소켓이 필요함
+		
 		try {
 			port=Integer.parseInt(t_port.getText());
-			socket = new Socket(ip, port);
+			socket=new Socket(ip, port);
 			
-			/* 대화를 나누기 전에 스트림 얻어놓기
-			buffr=new BufferedReader(new InputStreamReader(socket.getInputStream()));
-			buffw=new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
-		 	--> 이 업무를 동생에게 보내자 
-			 
-			 접속이 성공하면 buffr, buffw을 직접만들지 말고 그 정보를 담아두기만 하자
-			 실시간으로 서버의 메세지를 청취하기 위해 쓰레드를 생성하여 대화업무를 다 맟겨버리자
-			 따라서 종이컵&실의 보유자는 동생  */
-			
+			//접속이 완료되면, 이때부터 동생이 동작하도록 ct를 생성함= ct를 메모리에 올림
 			ct=new ClientThread(socket, area);
 			ct.start();
 			
-			ct.send("안녕?");
-			
-		} catch (NumberFormatException e) {
-			e.printStackTrace();
-		} catch (UnknownHostException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
-			e.printStackTrace();
+		} catch (NumberFormatException e1) {
+			e1.printStackTrace();
+		} catch (UnknownHostException e1) {
+			e1.printStackTrace();
+		} catch (IOException e1) {
+			e1.printStackTrace();
 		}
+	
 	}
 	
-
-	@Override
 	public void actionPerformed(ActionEvent e) {
 		connect();
 	}
-
+	
 	public static void main(String[] args) {
 		new ClientMain();
 	}
